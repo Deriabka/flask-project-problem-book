@@ -1,4 +1,4 @@
-from app import app,USERS,models,EXPRES
+from app import app,USERS,models,EXPRES,QUESTS
 from flask import request,Response
 import json
 from http import HTTPStatus
@@ -35,7 +35,7 @@ def create_user():
     return response
 @app.get('/users/<int:user_id>')
 def get_user(user_id):
-    if user_id<0 or user_id>=len(USERS):
+    if not models.User.is_valid_id(user_id):
         return Response(status=HTTPStatus.NOT_FOUND)
     user = USERS[user_id]
     response = Response(
@@ -72,7 +72,7 @@ def generate_expression():
             "id": expr.id,
             "operation": expr.operation,
             "values": expr.values,
-            "string_expression": expr.to_string()
+            "string_expression": expr.to_string(),
         }),
         HTTPStatus.OK,
         mimetype="application/json"
@@ -81,7 +81,7 @@ def generate_expression():
 
 @app.get('/math/<int:expression_id>')
 def get_expression(expression_id):
-    if expression_id<0 or expression_id>=len(EXPRES):
+    if not models.Expression.is_valid_id(expression_id):
         return Response(status=HTTPStatus.NOT_FOUND)
     expr = EXPRES[expression_id]
     response = Response(
@@ -89,8 +89,78 @@ def get_expression(expression_id):
             "id": expr.id,
             "operation": expr.operation,
             "values": expr.values,
-            "string_expression": expr.to_string()
+            "string_expression": expr.to_string(),
         }),
         HTTPStatus.OK,
         mimetype="application/json")
     return response
+
+@app.post('/math/<int:expression_id>/solve')
+def get_solve(expression_id):
+    data = request.get_json()
+    if not models.Expression.is_valid_id(expression_id):
+        return Response(status=HTTPStatus.NOT_FOUND)
+    expr = EXPRES[expression_id]
+    user_id = data["user_id"]
+    user_answer = data["user_answer"]
+    if not models.User.is_valid_id(user_id):
+        return Response(status=HTTPStatus.NOT_FOUND)
+    user = USERS[user_id]
+    if expr.answer == user_answer:
+        user.increase_score(expr.reward)
+    response = Response(
+        json.dumps({
+            "expression_id": expression_id,
+            "result": 'Верный' if expr.answer == user_answer else 'Неверный',
+            "reward": expr.reward
+        }),
+        HTTPStatus.OK,
+        mimetype="application/json")
+    return response
+
+
+@app.post("/questions/create")
+def questions_create():
+    data = request.get_json()
+    title = data["title"]
+    description = data["description"]
+    question_type = data["type"]
+    question_id = len(QUESTS)
+    if question_type == "ONE-ANSWER":
+        answer = data["answer"]
+        if not models.OneQuestion.is_valid(answer):
+            return Response(status=HTTPStatus.BAD_REQUEST)
+        question = models.OneQuestion(question_id, title, description, answer, reward=1)
+        QUESTS.append(question)
+        return Response(
+            json.dumps(
+                {
+                    "id": question.id,
+                    "title": question.title,
+                    "description": question.description,
+                    "type": question_type,
+                    "answer": question.answer
+                }
+            ),
+            status=HTTPStatus.OK,
+            mimetype="application/json")
+    elif question_type == "MULTIPLE-CHOICE":
+        choices = data["choices"]  # list
+        answer = data["answer"]  # int
+        if not models.MoreQuestions.is_valid(answer, choices):
+            return Response(status=HTTPStatus.BAD_REQUEST)
+        question = models.MoreQuestions(question_id, title, description, answer, choices, reward=1)
+        QUESTS.append(question)
+        return Response(
+            json.dumps(
+                {
+                    "id": question.id,
+                    "title": question.title,
+                    "description": question.description,
+                    "type": question_type,
+                    "choices": question.choices,
+                    "answer": question.answer
+                }
+            ),
+            status=HTTPStatus.CREATED,
+            mimetype="application/json")
